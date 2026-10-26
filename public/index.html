@@ -1,0 +1,38 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Busca Preços</title><style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f8;color:#1d2733}
+header{background:#0f7b5f;color:#fff;padding:16px}h1{margin:0;font-size:1.3rem}#loc{font-size:.8rem;opacity:.85;margin-top:4px}
+main{max-width:760px;margin:auto;padding:14px}.segs{display:flex;gap:8px;margin-bottom:10px}.segs button{flex:1;padding:10px;border:1px solid #0f7b5f;background:#fff;color:#0f7b5f;border-radius:10px;font-weight:600}
+.segs button.on{background:#0f7b5f;color:#fff}form{display:flex;gap:8px}input{flex:1;padding:12px;font-size:1rem;border:1px solid #c7d0d9;border-radius:10px}
+form button{padding:12px 18px;background:#ff7a00;border:0;color:#fff;font-weight:700;border-radius:10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.chip{padding:8px 12px;border-radius:20px;background:#fff;border:1px solid #c7d0d9;cursor:pointer;font-size:.9rem}
+.chip.on{background:#e3f4ee;border-color:#0f7b5f}.chip small{color:#667}
+.card{background:#fff;border-radius:12px;padding:12px;margin:10px 0;display:flex;gap:12px;box-shadow:0 1px 3px #0001}
+.card img{width:64px;height:64px;object-fit:contain}.price{font-size:1.3rem;font-weight:800;color:#0f7b5f}.store{font-weight:700}
+.t{font-size:.88rem;color:#445}.loc{font-size:.82rem;margin-top:4px}.online{color:#a05a00}.best{border:2px solid #ff7a00}
+.status{font-size:.78rem;color:#556;margin-top:10px}.ok{color:#0a7}.err{color:#c33}a{color:#0b62c4}.msg{padding:12px;color:#556}
+</style></head><body><header><h1>🔎 Busca Preços</h1><div id="loc">Obtendo localização…</div></header><main>
+<div class="segs"><button data-s="farmacia" class="on">💊 Farmácia</button><button data-s="mercado">🛒 Mercado</button><button data-s="petshop">🐾 Petshop</button></div>
+<form id="f"><input id="q" placeholder="Ex.: dipirona, losartana, arroz 5kg, ração…" autocomplete="off"><button>Buscar</button></form>
+<div id="variants"></div><div id="results"></div><div id="status" class="status"></div></main>
+<script>
+let seg='farmacia',loc={lat:-23.0187,lon:-43.4893,def:true},cur='';
+const $=s=>document.querySelector(s),brl=v=>v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function showLoc(){$('#loc').textContent=loc.def?'📍 Localização padrão: Recreio, Rio de Janeiro':`📍 Sua localização: ${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)}`}
+showLoc();navigator.geolocation?.getCurrentPosition(p=>{loc={lat:p.coords.latitude,lon:p.coords.longitude};showLoc()},()=>{},{timeout:8000});
+document.querySelectorAll('.segs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.segs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');seg=b.dataset.s;$('#variants').innerHTML=$('#results').innerHTML=''});
+function stat(s,extra=''){ $('#status').innerHTML='Fontes: '+s.map(x=>`<span class="${x.ok?'ok':'err'}">${x.ok?'✔':'✖'} ${esc(x.source)}${x.ok?` (${x.count})`:` (${esc(x.error)})`}</span>`).join(' · ')+extra}
+$('#f').onsubmit=async e=>{e.preventDefault();cur=$('#q').value.trim();if(!cur)return;$('#results').innerHTML='';$('#variants').innerHTML='<div class="msg">Buscando apresentações…</div>';
+ const r=await (await fetch(`/api/variants?seg=${seg}&q=${encodeURIComponent(cur)}`)).json();stat(r.status);
+ if(!r.variants.length){$('#variants').innerHTML='<div class="msg">Nada encontrado nas fontes. Tente outro termo.</div>';return}
+ $('#variants').innerHTML='<div class="msg">Escolha a apresentação:</div><div class="chips">'+r.variants.map(v=>`<span class="chip" data-v="${esc(v.variant)}">${esc(v.variant)} <small>· ${v.count} ofertas · a partir de ${brl(v.min)}</small></span>`).join('')+`<span class="chip" data-v="">Todas</span></div>`;
+ document.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{document.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));c.classList.add('on');offers(c.dataset.v)})};
+async function offers(v){$('#results').innerHTML='<div class="msg">Comparando preços e lojas próximas…</div>';
+ const r=await (await fetch(`/api/offers?seg=${seg}&q=${encodeURIComponent(cur)}&variant=${encodeURIComponent(v)}&lat=${loc.lat}&lon=${loc.lon}`)).json();
+ stat(r.status,` · <span class="${r.osm.ok?'ok':'err'}">${r.osm.ok?'✔':'✖'} OpenStreetMap (${r.osm.ok?r.osm.shops+' filiais encontradas':esc(r.osm.error)})</span>`);
+ $('#results').innerHTML=r.offers.map((o,i)=>`<div class="card ${i?'':'best'}">${o.image?`<img src="${esc(o.image)}" alt="">`:''}<div style="flex:1">
+ <div class="price">${brl(o.price)} ${i?'':'<small style="font-size:.7rem;color:#ff7a00">MAIS BARATO</small>'}</div><div class="store">${esc(o.store)}</div><div class="t">${esc(o.title)}</div>
+ <div class="loc">${o.nearest?`📍 ${esc(o.nearest.name)}${o.nearest.address?' — '+esc(o.nearest.address):''} · <b>${o.nearest.km} km</b> (linha reta) · <a target="_blank" href="https://www.openstreetmap.org/?mlat=${o.nearest.lat}&mlon=${o.nearest.lon}#map=17/${o.nearest.lat}/${o.nearest.lon}">mapa</a>`:'<span class="online">🌐 só online (nenhuma loja física encontrada por perto)</span>'}</div>
+ <a target="_blank" rel="noopener" href="${esc(o.url)}">Ver oferta →</a></div></div>`).join('')||'<div class="msg">Sem ofertas.</div>'}
+</script></body></html>
