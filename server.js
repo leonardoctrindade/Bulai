@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const { interpretQuery, selectGenericOffers, savingsBetween, classifyQuery, NO_GENERIC_MESSAGE, NONE_FOUND_MESSAGE } = require('./lib/resolve');
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36';
 const OSM_UA = 'BuscaPrecosPrototype/0.1 (prototipo pessoal; contato via Grok Bot)';
 const DEFAULT = { lat: -23.0187, lon: -43.4893 };
@@ -122,25 +123,103 @@ const hits = new Map();
 app.set('trust proxy', true);
 app.use('/api', (req, res, next) => { const ip = req.ip, now = Date.now(); const h = (hits.get(ip) || []).filter(t => now - t < 60e3); h.push(now); hits.set(ip, h);
   if (h.length > 30) return res.status(429).json({ error: 'Muitas buscas. Aguarde um minuto.' }); next(); });
+function variantSummary(items) {
+  const g = {};
+  for (const i of items) {
+    (g[i.variant] ||= { variant: i.variant, count: 0, min: Infinity });
+    g[i.variant].count++;
+    g[i.variant].min = Math.min(g[i.variant].min, i.price);
+  }
+  return { variants: Object.values(g).sort((a, b) => rank(a.variant) - rank(b.variant) || b.count - a.count).slice(0, 16), total: items.length };
+}
+function correctionPayload(correction) {
+  if (!correction) return null;
+  if (correction.type === 'auto') return { type: 'auto', typed: correction.typed, term: correction.term, display: correction.display };
+  return { type: 'suggest', typed: correction.typed, suggestions: (correction.suggestions || []).map(s => ({ term: s.term, display: s.display })) };
+}
+async function resolveAndSearch(seg, rawQ) {
+  const interp = interpretQuery(rawQ, seg);
+  let searchQ = interp.searchQuery;
+  let correction = interp.correction;
+  let commerce = classifyQuery(searchQ, seg);
+  const parallelGeneric = interp.zeroResult?.decision === 'auto' ? null : (commerce.brand?.hasGeneric && commerce.brand.genericQuery);
+  const [data0, gen0] = await Promise.all([
+    searchAll(seg, searchQ),
+    parallelGeneric ? searchAll(seg, parallelGeneric) : Promise.resolve(null),
+  ]);
+  let data = data0;
+  let genericRaw = gen0;
+  const reachable = data.status.some(s => s.ok);
+  if (!data.items.length && reachable && interp.zeroResult?.decision === 'auto' && norm(interp.zeroResult.searchQuery) !== norm(searchQ)) {
+    const retry = await searchAll(seg, interp.zeroResult.searchQuery);
+    if (retry.items.length) {
+      data = retry;
+      searchQ = interp.zeroResult.searchQuery;
+      correction = interp.zeroResult.correction;
+      commerce = classifyQuery(searchQ, seg);
+      genericRaw = (commerce.brand?.hasGeneric && commerce.brand.genericQuery) ? await searchAll(seg, commerce.brand.genericQuery) : null;
+    }
+  } else if (!data.items.length && reachable && !correction && interp.zeroResult?.decision === 'suggest') {
+    correction = interp.zeroResult.correction;
+  }
+  let generic = null;
+  if (commerce.brand) {
+    generic = commerce.brand.hasGeneric
+      ? { unavailable: false, q: commerce.brand.genericQuery, items: genericRaw?.items || [], status: genericRaw?.status || [] }
+      : { unavailable: true, message: NO_GENERIC_MESSAGE, q: null, items: [], status: [] };
+  }
+  return { searchQ, correction, commerce, data, generic };
+}
 app.get('/api/variants', async (req, res) => {
   const seg = SEGS.includes(req.query.seg) ? req.query.seg : 'farmacia'; const q = (req.query.q || '').trim();
   if (!q) return res.status(400).json({ error: 'Digite um produto' });
-  const { items, status } = await searchAll(seg, q);
-  const g = {}; for (const i of items) { (g[i.variant] ||= { variant: i.variant, count: 0, min: Infinity }); g[i.variant].count++; g[i.variant].min = Math.min(g[i.variant].min, i.price); }
-  const variants = Object.values(g).sort((a, b) => rank(a.variant) - rank(b.variant) || b.count - a.count).slice(0, 16);
-  res.json({ q, seg, variants, total: items.length, status });
+  const found = await resolveAndSearch(seg, q);
+  const summary = variantSummary(found.data.items);
+  let generic = null;
+  if (found.generic) {
+    const picked = found.generic.unavailable ? [] : selectGenericOffers(found.generic.items, found.commerce.brand, null);
+    const gs = variantSummary(picked);
+    generic = {
+      unavailable: !!found.generic.unavailable,
+      message: found.generic.unavailable ? NO_GENERIC_MESSAGE : (picked.length ? null : NONE_FOUND_MESSAGE),
+      q: found.generic.q, variants: gs.variants, total: gs.total, min: picked[0]?.price ?? null,
+    };
+  }
+  res.json({
+    q, resolvedQ: found.searchQ, seg, correction: correctionPayload(found.correction),
+    brand: found.commerce.brand, ingredient: found.commerce.ingredient, generic,
+    variants: summary.variants, total: summary.total, status: found.data.status,
+  });
 });
 app.get('/api/offers', async (req, res) => {
   const seg = SEGS.includes(req.query.seg) ? req.query.seg : 'farmacia'; const q = (req.query.q || '').trim();
   const lat = parseFloat(req.query.lat) || DEFAULT.lat, lon = parseFloat(req.query.lon) || DEFAULT.lon;
-  const { items, status } = await searchAll(seg, q);
-  let list = req.query.variant ? items.filter(i => i.variant === req.query.variant) : items;
+  const found = await resolveAndSearch(seg, q);
+  let list = req.query.variant ? found.data.items.filter(i => i.variant === req.query.variant) : found.data.items;
   list = [...list].sort((a, b) => a.price - b.price).slice(0, 40);
-  const chains = [...new Set(list.map(i => i.osm).filter(Boolean))].slice(0, 8); const br = {}; let osmOk = true, osmErr, nShops = 0;
+  const genericList = (found.generic && !found.generic.unavailable)
+    ? selectGenericOffers(found.generic.items, found.commerce.brand, req.query.variant || null).slice(0, 12) : [];
+  const chains = [...new Set([...list, ...genericList].map(i => i.osm).filter(Boolean))].slice(0, 8);
+  const br = {}; let osmOk = true, osmErr, nShops = 0;
   for (const ch of chains) { try { br[ch] = await branches(ch, lat, lon); nShops += br[ch].length; } catch (e) { osmOk = false; osmErr = String(e.message); } }
-  const offers = list.map(i => { const n = nearest(br[i.osm], lat, lon);
-    return { ...i, osm: undefined, nearest: n ? { name: n.name, address: n.addr || null, km: +n.km.toFixed(1), lat: n.lat, lon: n.lon } : null }; });
-  res.json({ q, seg, variant: req.query.variant || null, location: { lat, lon }, offers, status, osm: { ok: osmOk, shops: nShops, error: osmErr } });
+  const toOffer = i => { const n = nearest(br[i.osm], lat, lon);
+    return { ...i, osm: undefined, nearest: n ? { name: n.name, address: n.addr || null, km: +n.km.toFixed(1), lat: n.lat, lon: n.lon } : null }; };
+  const offers = list.map(toOffer);
+  const genericOffers = genericList.map(toOffer);
+  let generic = null;
+  if (found.generic) {
+    generic = {
+      unavailable: !!found.generic.unavailable,
+      message: found.generic.unavailable ? NO_GENERIC_MESSAGE : (genericOffers.length ? null : NONE_FOUND_MESSAGE),
+      q: found.generic.q, offers: genericOffers, min: genericOffers[0]?.price ?? null,
+      savings: found.generic.unavailable ? null : savingsBetween(offers, genericOffers), status: found.generic.status,
+    };
+  }
+  res.json({
+    q, resolvedQ: found.searchQ, seg, variant: req.query.variant || null, location: { lat, lon },
+    correction: correctionPayload(found.correction), brand: found.commerce.brand, ingredient: found.commerce.ingredient,
+    generic, offers, status: found.data.status, osm: { ok: osmOk, shops: nShops, error: osmErr },
+  });
 });
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('Busca Preços em http://localhost:' + PORT));
