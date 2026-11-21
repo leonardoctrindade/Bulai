@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
   for (const [seg,q,v] of runs) {
     const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2, geolocation: { latitude: -23.0187, longitude: -43.4893 }, permissions: ['geolocation'] });
     const p = await ctx.newPage(); await p.goto('http://localhost:3000');
-    await p.click(`button[data-s=${seg}]`); await p.fill('#q', q); await p.click('form button');
+    await p.click(`button[data-s=${seg}]`); await p.fill('#q', q); await p.click('#f button');
     await p.waitForSelector('.chip', { timeout: 60000 });
     const name = q.replace(/\s+/g,'-') + (v && v.startsWith('Comb') ? '-combinacoes' : '');
     await p.screenshot({ path: `screens/${seg}-${name}-variantes.png`, fullPage: true });

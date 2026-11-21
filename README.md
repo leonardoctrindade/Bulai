@@ -15,6 +15,19 @@ As ofertas **perto de você** são só de redes com loja num raio de 30 km (dist
 
 Fontes que o site bloqueia daqui e ficam de fora do preço: Farmácias Nissei, Panvel, Petz, Petlove, Pão de Açúcar, Assaí e Extra. Sem resposta, a fonte aparece como ✖. Nada é inventado.
 
+## Hotéis e passagens
+As abas **Hotéis** e **Passagens** pedem adultos, crianças (com a idade de cada uma, de 0 a 17) e, no hotel, a distribuição por quarto. Dá para filtrar datas flexíveis, cabine, escalas, bagagem, horário, estrelas, café da manhã, cancelamento, comodidades e ordenação.
+
+O servidor tenta ler preço de verdade em cada fonte. Se o site bloqueia o datacenter, devolve timeout ou só monta a página no navegador, **não aparece valor**. No lugar, a tela abre a busca já preenchida (Google, Kayak, Decolar, Booking, Hoteis.com, Expedia, Trivago, Hurb, Skyscanner, MaxMilhas, 123milhas, ViajaNet, Submarino Viagens, LATAM, GOL e Azul).
+
+Para tarifa e diária via API, crie um app em [Amadeus for Developers](https://developers.amadeus.com/) e defina no Render:
+
+- `AMADEUS_CLIENT_ID`
+- `AMADEUS_CLIENT_SECRET`
+- `AMADEUS_HOST` (opcional; padrão `https://test.api.amadeus.com`, produção `https://api.amadeus.com`)
+
+Sem essas variáveis a comparação automática fica vazia e só os links aparecem. Bebê (0 ou 1 ano) vai como infantil no colo; de 2 a 11 anos, como criança; de 12 a 17, somado aos adultos nas companhias que não têm essa faixa.
+
 ## Digitação e genéricos
 Um termo com erro (ex.: "diprona", "monajuro", "losartan") é comparado a um dicionário local de princípios ativos, marcas vendidas no Brasil e itens de mercado/petshop. A comparação usa distância de Damerau-Levenshtein, semelhança de trigramas e uma chave fonética simples de pt-BR (sem acento, h mudo, s/z/x/c). Se o palpite é seguro, a busca já usa o nome certo e a tela avisa "Mostrando resultados para …". Se houver mais de um candidato próximo, aparecem atalhos "Você quis dizer".
 

@@ -1,12 +1,12 @@
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Busca Preços</title><style>
-*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f8;color:#1d2733}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f8;color:#1d2733}
 header{background:#0f7b5f;color:#fff;padding:16px}h1{margin:0;font-size:1.3rem}#loc{font-size:.8rem;opacity:.9;margin-top:4px}
 #locf{display:flex;gap:8px;margin-top:8px}#locf input{flex:1;padding:8px 10px;border:0;border-radius:8px;font-size:.9rem}
 #locf button{padding:8px 12px;border:0;border-radius:8px;background:#ff7a00;color:#fff;font-weight:700;cursor:pointer}
 #locf #gps{background:#fff;color:#0f7b5f}
 main{max-width:760px;margin:auto;padding:14px}main.wide{max-width:1080px}
-.segs{display:flex;gap:8px;margin-bottom:10px}.segs button{flex:1;padding:10px;border:1px solid #0f7b5f;background:#fff;color:#0f7b5f;border-radius:10px;font-weight:600}
+.segs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}.segs button{flex:1 1 30%;padding:10px;border:1px solid #0f7b5f;background:#fff;color:#0f7b5f;border-radius:10px;font-weight:600}
 .segs button.on{background:#0f7b5f;color:#fff}form{display:flex;gap:8px}input{flex:1;padding:12px;font-size:1rem;border:1px solid #c7d0d9;border-radius:10px}
 form button{padding:12px 18px;background:#ff7a00;border:0;color:#fff;font-weight:700;border-radius:10px}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.chip,.sug{padding:8px 12px;border-radius:20px;background:#fff;border:1px solid #c7d0d9;cursor:pointer;font-size:.9rem}
@@ -22,30 +22,108 @@ h2.sec{font-size:1rem;margin:8px 0}
 .compare{display:grid;gap:16px}
 @media(min-width:900px){.compare.has-generic{grid-template-columns:1fr 1fr;align-items:start}}
 .status{font-size:.78rem;color:#556;margin-top:10px}.ok{color:#0a7}.err{color:#c33}a{color:#0b62c4}.msg{padding:12px;color:#556}
+form.stack{display:block}form.stack input,form.stack select{flex:none;width:100%;margin-top:4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.rowlab{font-size:.82rem;color:#334;display:block;margin-top:8px}
+.ages{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.ages select{width:auto}
+.room{background:#fff;border:1px solid #e1e7ee;border-radius:10px;padding:8px;margin-top:8px}
+#overlay{position:fixed;inset:0;background:rgba(15,32,40,.55);z-index:80;display:flex;align-items:center;justify-content:center;padding:20px}
+#overlay[hidden]{display:none!important}
+.oload{background:#fff;border-radius:16px;padding:28px 26px;text-align:center;max-width:340px;box-shadow:0 8px 30px #0003}
+.spin{width:46px;height:46px;border:4px solid #d7eee6;border-top-color:#0f7b5f;border-radius:50%;margin:0 auto 14px;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#oload{font-weight:700;margin:0 0 8px}#ohint{font-size:.82rem;color:#556;margin:0}
 </style></head><body><header><h1>🔎 Busca Preços</h1><div id="loc">Obtendo localização…</div>
 <form id="locf"><input id="place" placeholder="CEP ou cidade (ex. 85884-000 ou Medianeira PR)" autocomplete="off"><button>Usar local</button><button type="button" id="gps">GPS</button></form></header><main id="main">
-<div class="segs"><button data-s="farmacia" class="on">💊 Farmácia</button><button data-s="mercado">🛒 Mercado</button><button data-s="petshop">🐾 Petshop</button></div>
+<div class="segs"><button type="button" data-s="farmacia" class="on">💊 Farmácia</button><button type="button" data-s="mercado">🛒 Mercado</button><button type="button" data-s="petshop">🐾 Petshop</button><button type="button" data-s="hoteis">🏨 Hotéis</button><button type="button" data-s="voos">✈️ Passagens</button></div>
 <form id="f"><input id="q" placeholder="Ex.: dipirona, losartana, arroz 5kg, ração…" autocomplete="off"><button>Buscar</button></form>
+<form id="hf" class="stack" hidden>
+<label class="rowlab">Cidade<input id="hcity" placeholder="Ex.: Foz do Iguaçu" autocomplete="off"></label>
+<div class="grid2"><label class="rowlab">Check-in<input id="hin" type="date"></label><label class="rowlab">Check-out<input id="hout" type="date"></label></div>
+<label class="rowlab">Quartos <input id="hrooms" type="number" min="1" max="4" value="1"></label>
+<div id="hroombox"></div>
+<div class="grid2"><label class="rowlab">Preço mín./noite<input id="hpmin" type="number" min="0" placeholder="R$"></label><label class="rowlab">Preço máx./noite<input id="hpmax" type="number" min="0" placeholder="R$"></label></div>
+<div class="grid2"><label class="rowlab">Estrelas mín.<select id="hstars"><option value="">qualquer</option><option>3</option><option>4</option><option>5</option></select></label>
+<label class="rowlab">Nota mín. (0–10)<input id="hrating" type="number" min="0" max="10" step="0.1" placeholder="ex. 8"></label></div>
+<label class="rowlab">Tipo<select id="htype"><option value="">qualquer</option><option value="hotel">Hotel</option><option value="pousada">Pousada</option><option value="apartment">Apartamento</option><option value="resort">Resort</option></select></label>
+<label class="rowlab">Distância máx. do centro (km)<input id="hdist" type="number" min="1" max="100" placeholder="ex. 5"></label>
+<div class="filters" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+<label><input type="checkbox" id="hbreakfast"> café da manhã</label>
+<label><input type="checkbox" id="hcancel"> cancelamento grátis</label>
+<label><input type="checkbox" value="pool" class="ham"> piscina</label>
+<label><input type="checkbox" value="parking" class="ham"> estacionamento</label>
+<label><input type="checkbox" value="wifi" class="ham"> wifi</label>
+<label><input type="checkbox" value="pets" class="ham"> aceita pets</label>
+</div>
+<label class="rowlab">Ordenar<select id="hsort"><option value="price">menor preço</option><option value="rating">melhor nota</option><option value="distance">mais perto do centro</option></select></label>
+<button style="margin-top:10px">Buscar hotéis</button>
+</form>
+<form id="ff" class="stack" hidden>
+<div class="grid2"><label class="rowlab">Origem<input id="forigin" placeholder="Cidade ou IATA (GIG, SDU, CAC)" autocomplete="off"></label>
+<label class="rowlab">Destino<input id="fdest" placeholder="Cidade ou IATA" autocomplete="off"></label></div>
+<div id="fairport"></div>
+<label class="rowlab">Trecho<select id="ftrip"><option value="round">Ida e volta</option><option value="oneway">Somente ida</option></select></label>
+<div class="grid2"><label class="rowlab">Ida<input id="fout" type="date"></label><label class="rowlab">Volta<input id="fret" type="date"></label></div>
+<div class="grid2"><label class="rowlab">Adultos<input id="fadults" type="number" min="1" max="9" value="1"></label><label class="rowlab">Crianças<input id="fkids" type="number" min="0" max="8" value="0"></label></div>
+<div id="fages" class="ages"></div>
+<div class="grid2"><label class="rowlab">Cabine<select id="fcabin"><option value="economy">Econômica</option><option value="premium">Premium economy</option><option value="business">Executiva</option><option value="first">Primeira</option></select></label>
+<label class="rowlab">Saída<select id="fwindow"><option value="any">qualquer horário</option><option value="madrugada">madrugada</option><option value="manha">manhã</option><option value="tarde">tarde</option><option value="noite">noite</option></select></label></div>
+<div class="grid2"><label class="rowlab">Máx. escalas<select id="fstops"><option value="any">qualquer</option><option value="0">só direto</option><option value="1">até 1</option><option value="2">até 2</option></select></label>
+<label class="rowlab">Preço máximo<input id="fmax" type="number" min="1" placeholder="R$"></label></div>
+<label class="rowlab">Companhias (opcional)<input id="fair" placeholder="GOL, LATAM, Azul ou G3, LA, AD"></label>
+<div class="filters" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+<label><input type="checkbox" id="fflex"> datas flexíveis (±3 dias)</label>
+<label><input type="checkbox" id="fdirect"> somente direto</label>
+<label><input type="checkbox" id="fbag"> bagagem despachada</label>
+</div>
+<label class="rowlab">Ordenar<select id="fsort"><option value="price">menor preço</option><option value="duration">menor duração</option></select></label>
+<button style="margin-top:10px">Buscar passagens</button>
+</form>
 <div id="notice"></div><div id="variants"></div><div id="compare"></div><div id="status" class="status"></div></main>
+<div id="overlay" hidden><div class="oload"><div class="spin"></div><p id="oload">Buscando os menores preços...</p><p id="ohint" hidden>Se o serviço acabou de acordar no plano gratuito do Render, a primeira resposta pode levar cerca de 30 segundos.</p></div></div>
 <script>
 let seg='farmacia',cur='';
 const DEFAULT={lat:-23.0187,lon:-43.4893,label:'Recreio, Rio de Janeiro',def:true,manual:false};
 let loc=(()=>{try{const s=JSON.parse(localStorage.getItem('busca-precos-place')||'null'); if(s&&s.manual&&Number.isFinite(s.lat)) return s;}catch{} return {...DEFAULT};})();
 const $=s=>document.querySelector(s),brl=v=>v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let loaders=0, hintTimer;
+function track(msg, promise){
+  loaders++;
+  $('#overlay').hidden=false; $('#oload').textContent=msg; $('#ohint').hidden=true;
+  clearTimeout(hintTimer); hintTimer=setTimeout(()=>{ if(loaders) $('#ohint').hidden=false; }, 4000);
+  const done=()=>{ loaders=Math.max(0,loaders-1); if(!loaders){ $('#overlay').hidden=true; clearTimeout(hintTimer);} };
+  return Promise.resolve(promise).then(v=>{ done(); return v; }, e=>{ done(); throw e; });
+}
+function fetchT(url, opt={}, ms=50000){
+  const ctl=new AbortController(); const t=setTimeout(()=>ctl.abort(), ms);
+  return fetch(url, {...opt, signal:ctl.signal}).finally(()=>clearTimeout(t));
+}
+function iso(d){ const z=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
+function nextWeekend(){
+  const d=new Date(); const day=d.getDay(); const toSat=(6-day+7)%7 || 7;
+  const sat=new Date(d); sat.setDate(d.getDate()+toSat); const mon=new Date(sat); mon.setDate(sat.getDate()+2);
+  return {inn:iso(sat), out:iso(mon)};
+}
 function showLoc(){$('#loc').textContent=loc.def?`📍 Localização padrão: ${loc.label}. Informe seu CEP para buscar perto de você.`:`📍 ${loc.label||'Sua localização'} · raio de 30 km`}
 function saveLoc(){try{localStorage.setItem('busca-precos-place', JSON.stringify(loc));}catch{}}
 function useGps(){navigator.geolocation?.getCurrentPosition(p=>{loc={lat:p.coords.latitude,lon:p.coords.longitude,label:'Sua localização (GPS)',def:false,manual:false};saveLoc();showLoc();},()=>{},{timeout:8000,enableHighAccuracy:true});}
 showLoc(); if(!loc.manual) useGps();
 $('#gps').onclick=()=>{loc={...DEFAULT,manual:false};saveLoc();showLoc();useGps();};
 $('#locf').onsubmit=async e=>{e.preventDefault(); const q=$('#place').value.trim(); if(!q) return;
-  $('#loc').textContent='Buscando local…';
-  try{ const r=await (await fetch('/api/geo?q='+encodeURIComponent(q))).json();
+  try{ const r=await track('Localizando o CEP ou a cidade...', fetchT('/api/geo?q='+encodeURIComponent(q)).then(r=>r.json()));
     if(r.error){$('#loc').textContent=r.error; return;}
     loc={lat:r.lat,lon:r.lon,label:r.label,def:false,manual:true}; saveLoc(); showLoc();
   }catch{ $('#loc').textContent='Não foi possível localizar.'; }
 };
-document.querySelectorAll('.segs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.segs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');seg=b.dataset.s;$('#notice').innerHTML=$('#variants').innerHTML=$('#compare').innerHTML='';$('#main').classList.remove('wide')});
+function showSeg(s){
+  seg=s;
+  document.querySelectorAll('.segs button').forEach(x=>x.classList.toggle('on', x.dataset.s===s));
+  const travel=s==='hoteis'||s==='voos';
+  $('#f').hidden=travel; $('#hf').hidden=s!=='hoteis'; $('#ff').hidden=s!=='voos';
+  $('#notice').innerHTML=$('#variants').innerHTML=$('#compare').innerHTML=$('#status').innerHTML='';
+  $('#main').classList.remove('wide');
+}
+document.querySelectorAll('.segs button').forEach(b=>b.onclick=()=>showSeg(b.dataset.s));
 function stat(s,extra=''){ $('#status').innerHTML='Fontes: '+s.map(x=>`<span class="${x.ok?'ok':'err'}">${x.ok?'✔':'✖'} ${esc(x.source)}${x.ok?` (${x.count})`:` (${esc(x.error)})`}</span>`).join(' · ')+extra}
 function bindSuggestions(){document.querySelectorAll('.sug').forEach(b=>b.onclick=()=>{$('#q').value=b.dataset.q;$('#f').requestSubmit()})}
 function renderNotice(r){
@@ -71,7 +149,7 @@ function cards(offers,badge,radius){return (offers||[]).map((o,i)=>`<div class="
  <a target="_blank" rel="noopener" href="${esc(o.url)}">Ver oferta →</a></div></div>`).join('')||'<div class="msg">Sem ofertas.</div>'}
 $('#f').onsubmit=async e=>{e.preventDefault();cur=$('#q').value.trim();if(!cur)return;$('#compare').innerHTML='';$('#main').classList.remove('wide');$('#variants').innerHTML='<div class="msg">Buscando apresentações…</div>';$('#notice').innerHTML='';
  try{
-  const r=await (await fetch(`/api/variants?seg=${seg}&q=${encodeURIComponent(cur)}`)).json();
+  const r=await track('Buscando apresentações...', fetchT(`/api/variants?seg=${seg}&q=${encodeURIComponent(cur)}`).then(r=>r.json()));
   if(r.error){$('#variants').innerHTML=`<div class="msg">${esc(r.error)}</div>`;return}
   stat(r.status||[]); renderNotice(r);
   if(!r.variants.length){$('#variants').innerHTML='<div class="msg">Nada encontrado nas fontes. Tente outro termo.</div>';return}
@@ -80,7 +158,7 @@ $('#f').onsubmit=async e=>{e.preventDefault();cur=$('#q').value.trim();if(!cur)r
  }catch{ $('#variants').innerHTML='<div class="msg">Não foi possível buscar agora.</div>'; }
 };
 async function offers(v){$('#compare').innerHTML='<div class="msg">Comparando preços e lojas próximas…</div>';
- let r; try{ r=await (await fetch(`/api/offers?seg=${seg}&q=${encodeURIComponent(cur)}&variant=${encodeURIComponent(v)}&lat=${loc.lat}&lon=${loc.lon}&label=${encodeURIComponent(loc.label||'')}`)).json(); }
+ let r; try{ r=await track('Buscando os menores preços...', fetchT(`/api/offers?seg=${seg}&q=${encodeURIComponent(cur)}&variant=${encodeURIComponent(v)}&lat=${loc.lat}&lon=${loc.lon}&label=${encodeURIComponent(loc.label||'')}`).then(r=>r.json())); }
  catch{ $('#compare').innerHTML='<div class="msg">Não foi possível buscar agora.</div>'; return; }
  if(r.error){ $('#compare').innerHTML=`<div class="msg">${esc(r.error)}</div>`; return; }
  stat(r.status||[],` · <span class="${r.osm?.ok?'ok':'err'}">${r.osm?.ok?'✔':'✖'} OpenStreetMap (${r.osm?.ok?r.osm.shops+' filiais encontradas':esc(r.osm?.error)})</span>`);
@@ -108,4 +186,95 @@ async function offers(v){$('#compare').innerHTML='<div class="msg">Comparando pr
   $('#compare').innerHTML=`<h2 class="sec">Perto de você (até ${radius} km)</h2>`+(near.length?cards(near,'MAIS BARATO',radius):'<div class="msg">Nenhuma rede com loja num raio de '+radius+' km.</div>')+onlineHtml;
  }
 }
+function ageSelects(box, n, prev){
+  box.innerHTML='';
+  for(let i=0;i<n;i++){
+    const s=document.createElement('select');
+    for(let a=0;a<=17;a++){ const o=document.createElement('option'); o.value=a; o.textContent=a===0?'< 1 ano':a+' anos'; if(String(prev[i]??8)===String(a)&&i) {} s.appendChild(o); }
+    s.value=String(prev[i]??8);
+    box.appendChild(s);
+  }
+}
+function readAges(box){ return [...box.querySelectorAll('select')].map(s=>Number(s.value)); }
+function drawRooms(){
+  const n=Math.max(1, Math.min(4, Number($('#hrooms').value)||1));
+  const prev=[...$('#hroombox').querySelectorAll('.room')].map(room=>({adults:room.querySelector('.ra').value, kids:room.querySelector('.rc').value, ages:readAges(room.querySelector('.ages'))}));
+  $('#hroombox').innerHTML='';
+  for(let i=0;i<n;i++){
+    const p=prev[i]||{adults:i?1:2, kids:0, ages:[]};
+    const div=document.createElement('div'); div.className='room';
+    div.innerHTML=`<b>Quarto ${i+1}</b><div class="grid2"><label class="rowlab">Adultos<input class="ra" type="number" min="1" max="6" value="${p.adults}"></label><label class="rowlab">Crianças<input class="rc" type="number" min="0" max="6" value="${p.kids}"></label></div><div class="ages"></div>`;
+    $('#hroombox').appendChild(div);
+    const ages=div.querySelector('.ages');
+    ageSelects(ages, Number(p.kids)||0, p.ages);
+    div.querySelector('.rc').oninput=()=>ageSelects(ages, Math.max(0, Number(div.querySelector('.rc').value)||0), readAges(ages));
+  }
+}
+function hotelBody(){
+  const rooms=[...$('#hroombox').querySelectorAll('.room')].map(room=>({adults:Number(room.querySelector('.ra').value), childAges:readAges(room.querySelector('.ages'))}));
+  return { city:$('#hcity').value.trim(), checkIn:$('#hin').value, checkOut:$('#hout').value, rooms,
+    priceMin:$('#hpmin').value, priceMax:$('#hpmax').value, stars:$('#hstars').value, ratingMin:$('#hrating').value,
+    propertyType:$('#htype').value, maxDistanceKm:$('#hdist').value, breakfast:$('#hbreakfast').checked, freeCancellation:$('#hcancel').checked,
+    amenities:[...document.querySelectorAll('.ham:checked')].map(x=>x.value), sort:$('#hsort').value };
+}
+function flightBody(){
+  return { origin:$('#forigin').value.trim(), destination:$('#fdest').value.trim(), trip:$('#ftrip').value,
+    depart:$('#fout').value, ret:$('#fret').value, adults:Number($('#fadults').value), children:Number($('#fkids').value), childAges:readAges($('#fages')),
+    flex:$('#fflex').checked, cabin:$('#fcabin').value, directOnly:$('#fdirect').checked||$('#fstops').value==='0', maxStops:$('#fstops').value,
+    baggage:$('#fbag').checked, airlines:$('#fair').value, departWindow:$('#fwindow').value, maxPrice:$('#fmax').value, sort:$('#fsort').value };
+}
+function travelCards(offers){
+  return offers.map((o,i)=>`<div class="card ${i?'':'best'}"><div style="flex:1"><div class="price">${brl(o.price)} ${i?'':'<small style="font-size:.7rem;color:#ff7a00">MAIS BARATO</small>'}</div>
+  <div class="store">${esc(o.source)} · ${esc(o.title||'')}</div>
+  <div class="t">${[o.airlineName||o.airline, o.stops!=null?(o.stops?o.stops+' escala(s)':'direto'):'', o.depart?String(o.depart).replace('T',' ').slice(0,16):'', o.stars?o.stars+' estrelas':'', o.rating!=null?'nota '+o.rating:'', o.distanceKm!=null?o.distanceKm+' km do centro':'', o.priceBasis==='estadia'?'total da estadia':o.priceBasis==='noite'?'por noite':''].filter(Boolean).map(esc).join(' · ')}</div>
+  <a target="_blank" rel="noopener" href="${esc(o.url)}">Reservar →</a></div></div>`).join('');
+}
+function travelLinks(sources){
+  const rows=(sources||[]).filter(s=>s.status!=='ok');
+  if(!rows.length) return '';
+  return '<h2 class="sec">Abrir a busca já preenchida</h2><div class="msg">Sem preço automático nestas fontes. O link leva adultos, idades das crianças e datas.</div><div class="chips">'+rows.map(s=>`<a class="chip" target="_blank" rel="noopener" href="${esc(s.url)}">${esc(s.source)}</a>`).join('')+'</div>'
+    +'<div class="status">'+rows.map(s=>`<span class="${s.status==='bloqueado'||s.status==='erro'?'err':'ok'}">${s.status==='bloqueado'?'✖':'•'} ${esc(s.source)} (${esc(s.status)}${s.note?': '+esc(String(s.note).slice(0,80)):''})</span>`).join(' · ')+'</div>';
+}
+async function postTravel(url, body, msg){
+  $('#compare').innerHTML=''; $('#status').innerHTML=''; $('#variants').innerHTML='';
+  let r;
+  try{ r=await track(msg, fetchT(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(x=>x.json())); }
+  catch{ $('#compare').innerHTML='<div class="msg">Não foi possível buscar agora. Tente de novo.</div>'; return; }
+  if(r.error){
+    $('#notice').innerHTML=`<div class="banner warn">${esc(r.error)}</div>`;
+    if(r.suggestions?.length) $('#variants').innerHTML='<div class="chips">'+r.suggestions.map(a=>`<button type="button" class="sug" data-code="${esc(a.code)}" data-field="${esc(r.field||'')}">${esc(a.display)}</button>`).join('')+'</div>';
+    document.querySelectorAll('#variants .sug').forEach(b=>b.onclick=()=>{ const id=b.dataset.field==='destination'?'#fdest':'#forigin'; $(id).value=b.dataset.code; });
+    return;
+  }
+  $('#notice').innerHTML=r.message?`<div class="banner">${esc(r.message)}</div>`:'';
+  const priced=(r.offers||[]).length?`<h2 class="sec">Menor preço primeiro</h2>`+travelCards(r.offers):'<div class="msg">Nenhuma tarifa ou diária automática.</div>';
+  $('#compare').innerHTML=priced+travelLinks(r.sources);
+  if(r.center?.label) $('#status').textContent='Centro usado na distância: '+r.center.label;
+}
+$('#hrooms').oninput=drawRooms; drawRooms();
+$('#fkids').oninput=()=>ageSelects($('#fages'), Math.max(0, Number($('#fkids').value)||0), readAges($('#fages')));
+$('#ftrip').oninput=()=>$('#fret').disabled=$('#ftrip').value==='oneway';
+const wk=nextWeekend(); $('#hin').value=wk.inn; $('#hout').value=wk.out; $('#fout').value=wk.inn; $('#fret').value=wk.out;
+$('#hf').onsubmit=e=>{ e.preventDefault(); postTravel('/api/hotels', hotelBody(), 'Buscando os menores preços de hotéis...'); };
+$('#ff').onsubmit=e=>{ e.preventDefault(); postTravel('/api/flights', flightBody(), 'Buscando as passagens mais baratas...'); };
+let airTimer;
+function bindAir(input){
+  input.addEventListener('input', ()=>{
+    clearTimeout(airTimer);
+    const q=input.value.trim();
+    if(q.length<2) return;
+    airTimer=setTimeout(async()=>{
+      try{
+        const r=await (await fetchT('/api/airports?q='+encodeURIComponent(q))).json();
+        if(!r.suggestions?.length) return;
+        $('#fairport').innerHTML='<div class="chips">'+r.suggestions.slice(0,4).map(a=>`<button type="button" class="sug" data-code="${esc(a.code)}" data-for="${input.id}">${esc(a.display)}</button>`).join('')+'</div>';
+        $('#fairport').querySelectorAll('.sug').forEach(b=>b.onclick=()=>{ $('#'+b.dataset.for).value=b.dataset.code; $('#fairport').innerHTML=''; });
+      }catch{}
+    }, 250);
+  });
+}
+bindAir($('#forigin')); bindAir($('#fdest'));
+if(location.hash==='#overlay'){ $('#overlay').hidden=false; $('#oload').textContent='Buscando os menores preços...'; $('#ohint').hidden=false; }
+if(location.hash==='#hoteis'){ showSeg('hoteis'); $('#hcity').value='Foz do Iguaçu'; }
+if(location.hash==='#voos'){ showSeg('voos'); $('#forigin').value='GIG'; $('#fdest').value='GRU'; }
 </script></body></html>

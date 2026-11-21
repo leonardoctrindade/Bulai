@@ -4,6 +4,8 @@ const { interpretQuery, selectGenericOffers, savingsBetween, classifyQuery, NO_G
 const { get } = require('./lib/http');
 const { sourcesFor, BY_ID } = require('./lib/sources');
 const { RADIUS_KM, norm, hav, shopMatchesChain, splitOffers, normalizeCep } = require('./lib/places');
+const { validateHotel, validateFlight, resolveAirport } = require('./lib/travel');
+const { searchHotels, searchFlights } = require('./lib/travel-sources');
 
 const OSM_UA = 'BuscaPrecosPrototype/0.2 (prototipo pessoal; contato via Grok Bot)';
 const DEFAULT = { lat: -23.0187, lon: -43.4893, label: 'Recreio, Rio de Janeiro' };
@@ -144,6 +146,7 @@ async function resolvePlace(raw) {
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json({ limit: '32kb' }));
 const rank = v => v === 'Outros' ? 2 : v.startsWith('Combinações') ? 1 : 0;
 const hits = new Map();
 app.set('trust proxy', true);
@@ -203,6 +206,32 @@ async function resolveAndSearch(seg, rawQ) {
   return { searchQ, correction, commerce, data, generic };
 }
 
+app.get('/api/airports', (req, res) => {
+  const found = resolveAirport(req.query.q || '');
+  res.json({ decision: found.decision, airport: found.airport || null, suggestions: found.suggestions || [] });
+});
+app.post('/api/hotels', async (req, res) => {
+  const parsed = validateHotel(req.body || {});
+  if (!parsed.ok) return res.status(400).json(parsed);
+  let center = null;
+  try { center = await resolvePlace(parsed.value.city); } catch { center = null; }
+  try {
+    const out = await searchHotels(parsed.value, center);
+    res.json({ ...out, center });
+  } catch (e) {
+    res.status(502).json({ error: 'Não foi possível consultar os hotéis agora.', offers: [], sources: [], message: String(e.message || e) });
+  }
+});
+app.post('/api/flights', async (req, res) => {
+  const parsed = validateFlight(req.body || {});
+  if (!parsed.ok) return res.status(400).json(parsed);
+  try {
+    const out = await searchFlights(parsed.value);
+    res.json(out);
+  } catch (e) {
+    res.status(502).json({ error: 'Não foi possível consultar as passagens agora.', offers: [], sources: [], message: String(e.message || e) });
+  }
+});
 app.get('/api/geo', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.status(400).json({ error: 'Informe um CEP ou cidade' });
