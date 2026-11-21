@@ -9,9 +9,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
-      - key: AMADEUS_CLIENT_ID
+      - key: SERPAPI_KEY
         sync: false
-      - key: AMADEUS_CLIENT_SECRET
-        sync: false
-      - key: AMADEUS_HOST
+      - key: LITEAPI_KEY
         sync: false

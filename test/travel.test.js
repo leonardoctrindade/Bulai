@@ -4,6 +4,7 @@ const {
   resolveAirport, validateHotel, validateFlight, flightLinks, hotelLinks,
   applyFlightFilters, sortOffers, coldStartHint, splitPax,
 } = require('../lib/travel');
+const { serpFlightsParams, serpHotelsParams, parseSerpFlights, providersConfigured } = require('../lib/travel-sources');
 
 const NOW = new Date('2026-11-21T15:00:00Z');
 
@@ -105,6 +106,43 @@ test('voo direto descarta escala e dica do Render só depois de alguns segundos'
   assert.equal(offers[0].source, 'D');
   assert.equal(coldStartHint(1000), '');
   assert.match(coldStartHint(5000), /30 segundos/);
+});
+
+test('SerpApi recebe idades e ocupação e não inventa preço sem chave', () => {
+  const prev = process.env.SERPAPI_KEY;
+  const prevLite = process.env.LITEAPI_KEY;
+  delete process.env.SERPAPI_KEY;
+  delete process.env.LITEAPI_KEY;
+  assert.deepEqual(providersConfigured(), { serpapi: false, liteapi: false });
+  if (prev) process.env.SERPAPI_KEY = prev;
+  if (prevLite) process.env.LITEAPI_KEY = prevLite;
+  const hotel = validateHotel({
+    city: 'Foz do Iguaçu', checkIn: '2026-11-28', checkOut: '2026-11-30',
+    rooms: [{ adults: 2, childAges: [0, 7] }],
+  }, NOW).value;
+  const hotels = serpHotelsParams(hotel);
+  assert.equal(hotels.get('adults'), '2');
+  assert.equal(hotels.get('children'), '2');
+  assert.equal(hotels.get('children_ages'), '1,7');
+  assert.equal(hotels.get('currency'), 'BRL');
+  const flight = validateFlight({
+    origin: 'GIG', destination: 'GRU', trip: 'oneway', depart: '2026-11-28',
+    adults: 1, children: 2, childAges: [1, 8], directOnly: true,
+  }, NOW).value;
+  const flights = serpFlightsParams(flight);
+  assert.equal(flights.get('adults'), '1');
+  assert.equal(flights.get('children'), '1');
+  assert.equal(flights.get('infants_on_lap'), '1');
+  assert.equal(flights.get('stops'), '1');
+  assert.equal(flights.get('departure_id'), 'GIG');
+  const parsed = parseSerpFlights({
+    best_flights: [{ price: 350, total_duration: 70, flights: [{ airline: 'GOL', flight_number: 'G3 1234', departure_airport: { time: '2026-11-28 09:00' }, arrival_airport: { time: '2026-11-28 10:10' } }] }],
+    other_flights: [{ price: null, flights: [] }, { flights: [{ airline: 'LATAM' }] }],
+  }, flight, 'https://www.google.com/travel/flights');
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].price, 350);
+  assert.equal(parsed[0].source, 'Google Voos');
+  assert.equal(parsed[0].stops, 0);
 });
 
 test('cascavel para o rio pede escolha entre GIG e SDU', () => {

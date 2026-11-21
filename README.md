@@ -20,13 +20,20 @@ As abas **Hotéis** e **Passagens** pedem adultos, crianças (com a idade de cad
 
 O servidor tenta ler preço de verdade em cada fonte. Se o site bloqueia o datacenter, devolve timeout ou só monta a página no navegador, **não aparece valor**. No lugar, a tela abre a busca já preenchida (Google, Kayak, Decolar, Booking, Hoteis.com, Expedia, Trivago, Hurb, Skyscanner, MaxMilhas, 123milhas, ViajaNet, Submarino Viagens, LATAM, GOL e Azul).
 
-Para tarifa e diária via API, crie um app em [Amadeus for Developers](https://developers.amadeus.com/) e defina no Render:
+A API self-service da Amadeus foi desligada em 17 de julho de 2026. O preço automático usa quem ainda deixa um desenvolvedor criar chave sozinho, sem credenciamento:
 
-- `AMADEUS_CLIENT_ID`
-- `AMADEUS_CLIENT_SECRET`
-- `AMADEUS_HOST` (opcional; padrão `https://test.api.amadeus.com`, produção `https://api.amadeus.com`)
+1. **SerpApi** (voos e hotéis, uma chave). São os preços do Google Voos e do Google Hotéis, em real.
+   1. Crie a conta em https://serpapi.com/users/sign_up (sem cartão).
+   2. Copie a chave em https://serpapi.com/manage-api-key.
+   3. No Render, crie a variável `SERPAPI_KEY` com esse valor.
+   Plano grátis: 250 buscas bem-sucedidas por mês e até 50 por hora. Busca em cache (1 h, mesmos parâmetros) não consome cota.
+2. **LiteAPI** (só hotéis, opcional, diária de estoque real, não o preço de vitrine do Google).
+   1. Crie a conta em https://dashboard.liteapi.travel/register (sem cartão na sandbox).
+   2. Copie a chave sandbox (`sand_...`) ou a de produção.
+   3. No Render, crie `LITEAPI_KEY`.
+   A busca de tarifas, a pré-reserva e a reserva não têm taxa enquanto a proporção de buscas por reserva se mantém razoável. A sandbox não pede cartão.
 
-Sem essas variáveis a comparação automática fica vazia e só os links aparecem. Bebê (0 ou 1 ano) vai como infantil no colo; de 2 a 11 anos, como criança; de 12 a 17, somado aos adultos nas companhias que não têm essa faixa.
+Sem `SERPAPI_KEY` e sem `LITEAPI_KEY` a comparação automática fica vazia e só os links aparecem. No Google Voos, bebê (0 ou 1 ano) vai no colo, de 2 a 11 anos conta como criança e de 12 a 17 entra nos adultos. No Google Hotéis cada idade segue na busca (menos de 1 ano vira 1, o mínimo que o Google aceita). Na LiteAPI cada quarto recebe os adultos e as idades exatamente como no formulário.
 
 ## Digitação e genéricos
 Um termo com erro (ex.: "diprona", "monajuro", "losartan") é comparado a um dicionário local de princípios ativos, marcas vendidas no Brasil e itens de mercado/petshop. A comparação usa distância de Damerau-Levenshtein, semelhança de trigramas e uma chave fonética simples de pt-BR (sem acento, h mudo, s/z/x/c). Se o palpite é seguro, a busca já usa o nome certo e a tela avisa "Mostrando resultados para …". Se houver mais de um candidato próximo, aparecem atalhos "Você quis dizer".
