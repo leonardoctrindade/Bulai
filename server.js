@@ -1,52 +1,20 @@
 const express = require('express');
 const path = require('path');
 const { interpretQuery, selectGenericOffers, savingsBetween, classifyQuery, NO_GENERIC_MESSAGE, NONE_FOUND_MESSAGE } = require('./lib/resolve');
-const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36';
-const OSM_UA = 'BuscaPrecosPrototype/0.1 (prototipo pessoal; contato via Grok Bot)';
-const DEFAULT = { lat: -23.0187, lon: -43.4893 };
+const { get } = require('./lib/http');
+const { sourcesFor, BY_ID } = require('./lib/sources');
+const { RADIUS_KM, norm, hav, shopMatchesChain, splitOffers, normalizeCep } = require('./lib/places');
+
+const OSM_UA = 'BuscaPrecosPrototype/0.2 (prototipo pessoal; contato via Grok Bot)';
+const DEFAULT = { lat: -23.0187, lon: -43.4893, label: 'Recreio, Rio de Janeiro' };
 const cache = new Map();
 async function cached(key, ttl, fn) {
   const c = cache.get(key); if (c && Date.now() - c.t < ttl) return c.v;
   const v = await fn(); cache.set(key, { t: Date.now(), v }); return v;
 }
-const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-async function get(url, opts = {}) {
-  const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 12000);
-  try {
-    const r = await fetch(url, { headers: { 'User-Agent': opts.ua || UA, 'Accept-Language': 'pt-BR' }, signal: ctl.signal, ...opts.fetch });
-    if (!r.ok && r.status !== 206) throw new Error('HTTP ' + r.status);
-    return opts.text ? r.text() : r.json();
-  } finally { clearTimeout(to); }
-}
 
-// ---- Sources ----
-const vtex = (name, base, osm) => ({ name, osm, async search(q) {
-  const data = await get(`${base}/api/catalog_system/pub/products/search?ft=${encodeURIComponent(q)}&_from=0&_to=49`);
-  const out = [];
-  for (const p of data) for (const it of p.items || []) {
-    const s = (it.sellers || []).find(s => s.commertialOffer && s.commertialOffer.AvailableQuantity > 0);
-    if (!s) continue;
-    out.push({ store: name, title: it.nameComplete || p.productName, brand: p.brand, category: (p.categories || [])[0], price: s.commertialOffer.Price,
-      listPrice: s.commertialOffer.ListPrice, url: p.link || `${base}/${p.linkText}/p`, image: it.images?.[0]?.imageUrl, osm });
-  }
-  return out;
-}});
-const buscape = { name: 'Buscapé (comparador)', async search(q) {
-  const h = await get(`https://www.buscape.com.br/search?q=${encodeURIComponent(q)}`, { text: true });
-  const m = h.match(/id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/); if (!m) throw new Error('sem dados');
-  const hits = JSON.parse(m[1]).props.initialReduxState.hits.hits || [];
-  return hits.filter(x => x.price).map(x => ({ store: (x.bestOffer?.merchantName || 'Loja') + ' (via Buscapé)', merchant: x.bestOffer?.merchantName,
-    title: x.name, price: x.price, url: 'https://www.buscape.com.br' + x.url, category: x.categoryName, image: x.image, osm: x.bestOffer?.merchantName, storeCount: x.storeCount }));
-}};
-const SOURCES = {
-  farmacia: [vtex('Drogarias Pacheco', 'https://www.drogariaspacheco.com.br', 'Pacheco'), vtex('Drogaria Venancio', 'https://www.drogariavenancio.com.br', 'Venancio'),
-    vtex('Pague Menos', 'https://www.paguemenos.com.br', 'Pague Menos'), vtex('Drogaria São Paulo', 'https://www.drogariasaopaulo.com.br', 'Drogaria São Paulo'), buscape],
-  mercado: [vtex('Prezunic', 'https://www.prezunic.com.br', 'Prezunic'), vtex('Zona Sul', 'https://www.zonasul.com.br', 'Zona Sul'),
-    vtex('Atacadão', 'https://www.atacadao.com.br', 'Atacadão'), buscape],
-  petshop: [vtex('Cobasi', 'https://www.cobasi.com.br', 'Cobasi'), buscape],
-};
+const SEGS = ['farmacia', 'mercado', 'petshop'];
 
-// ---- Variants: extract dosage/size + quantity from titles ----
 function variantOf(title) {
   const t = norm(title).replace(/(\d),(\d)/g, '$1.$2');
   const dose = t.match(/(\d+(?:\.\d+)?)\s*(mg\/ml|mcg|mg|kg|g|ml|l)\b/);
@@ -64,65 +32,129 @@ async function searchAll(seg, q) {
   return cached(`s:${seg}:${norm(q)}`, 15 * 60e3, async () => {
     const toks = norm(q).split(/\s+/).filter(w => w.length > 1);
     const status = []; let items = [];
-    await Promise.all(SOURCES[seg].map(async src => {
+    await Promise.all(sourcesFor(seg).map(async src => {
       const t0 = Date.now();
-      try { const r = await src.search(q); const ok = r.filter(x => toks.every(w => norm(x.title).replace(/\s/g, '').includes(w.replace(/\s/g, ''))));
-        items.push(...ok); status.push({ source: src.name, ok: true, count: ok.length, ms: Date.now() - t0 }); }
-      catch (e) { status.push({ source: src.name, ok: false, error: String(e.message || e), ms: Date.now() - t0 }); }
+      try {
+        const r = await src.search(q);
+        const ok = r.filter(x => toks.every(w => norm(x.title).replace(/\s/g, '').includes(w.replace(/\s/g, ''))));
+        items.push(...ok);
+        status.push({ source: src.name, ok: true, count: ok.length, ms: Date.now() - t0 });
+      } catch (e) { status.push({ source: src.name, ok: false, error: String(e.message || e), ms: Date.now() - t0 }); }
     }));
     const nq = norm(q);
     const BAD = /panela|eletric|eletrodom|maquina|cooker|liquidific|fogao|forno|micro-?ondas|cozedor|celular|notebook|brinquedo|livro|camiseta|capinha/;
     items = items.filter(i => !BAD.test(norm(i.title + ' ' + (i.category || ''))) || BAD.test(nq));
-    if (seg !== 'farmacia') { const f = norm(q).split(/\s+/)[0]; const head = items.filter(i => norm(i.title).startsWith(f));
-      if (head.length >= 5) items = head; }
+    if (seg === 'mercado' && !/racao|caes|cachorr|gato|felin|canin|pet/.test(nq)) {
+      items = items.filter(i => !/racao|caes|cachorr|gato|felin|canin|petisco/.test(norm(i.title + ' ' + (i.category || ''))));
+    }
+    if (seg !== 'farmacia') {
+      const f = norm(q).split(/\s+/)[0];
+      const head = items.filter(i => norm(i.title).startsWith(f));
+      if (head.length >= 5) items = head;
+    }
     const COMBO = /\+|\bassociad|hidroclorotiazida|anlodipino|cafeina|orfenadrina|escopolamina|butilbrometo|clorfeniramina|paracetamol|anlodipina|\bcomposto\b/;
     for (const i of items) {
       const t = norm(i.title); const m = t.match(COMBO);
       if (seg === 'farmacia' && m && !(m[0] !== '+' && nq.includes(m[0])) && !nq.includes('+')) i.variant = 'Combinações (com outro princípio ativo)';
       else i.variant = variantOf(i.title) || 'Outros';
     }
-    // grupos com 1 oferta só viram "Outros"
     const cnt = {}; items.forEach(i => cnt[i.variant] = (cnt[i.variant] || 0) + 1);
     items.forEach(i => { if (cnt[i.variant] < 2) i.variant = i.variant.startsWith('Combinações') ? i.variant : 'Outros'; });
     return { items, status };
   });
 }
 
-// ---- Store locations via Overpass (one query per segment+area, cached 24h) ----
-const _unused = {
-  farmacia: ['nwr["amenity"="pharmacy"]', 'nwr["shop"="chemist"]'],
-  mercado: ['nwr["shop"="supermarket"]', 'nwr["shop"="wholesale"]'],
-  petshop: ['nwr["shop"="pet"]'],
-};
-function hav(a, b, c, d) { const R = 6371, r = x => x * Math.PI / 180; const x = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }
 let nomQ = Promise.resolve();
-function nominatim(url) { // fila: no máx. 1 req/s (política do Nominatim)
-  const p = nomQ.then(() => get(url, { ua: OSM_UA })); nomQ = p.catch(() => {}).then(() => new Promise(r => setTimeout(r, 1100))); return p;
+function nominatim(url) {
+  const p = nomQ.then(() => get(url, { ua: OSM_UA, timeout: 12000 }));
+  nomQ = p.catch(() => {}).then(() => new Promise(r => setTimeout(r, 1100)));
+  return p;
+}
+
+function placeOk(e, chain) {
+  const cat = e.category || '', type = e.type || '', name = norm(e.name || '');
+  if (chain.segment === 'farmacia') {
+    if (type === 'pharmacy' || type === 'chemist') return true;
+    return /farmacia|drogaria|drugstore|drogal|raia|drogasil|pacheco|venancio|nissei|panvel/.test(name);
+  }
+  if (chain.segment === 'mercado') {
+    if (cat === 'shop' && /super|wholesale|mall|convenience|department/.test(type)) return true;
+    return /super|atacad|mercado|hiper|carrefour|mambo|zaffari|muffato|angeloni/.test(name);
+  }
+  if (chain.segment === 'petshop') return type === 'pet' || /pet|cobasi/.test(name);
+  return cat === 'shop' || cat === 'amenity';
 }
 async function branches(chain, lat, lon) {
-  const d = 0.15, key = `n:${norm(chain)}:${lat.toFixed(2)}:${lon.toFixed(2)}`;
+  const key = `n:${chain.id}:${lat.toFixed(2)}:${lon.toFixed(2)}`;
   const c = cache.get(key); if (c) return c.v;
+  const d = 0.45;
   const vb = [lon - d, lat + d, lon + d, lat - d].map(x => x.toFixed(4)).join(',');
-  const r = await nominatim(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(chain)}&format=jsonv2&limit=40&bounded=1&viewbox=${vb}&addressdetails=1&accept-language=pt-BR`);
-  const v = r.filter(e => e.category === 'shop' || e.category === 'amenity').map(e => { const a = e.address || {};
-    return { name: e.name || chain, lat: +e.lat, lon: +e.lon, addr: [a.road, a.house_number].filter(Boolean).join(', ') + (a.suburb ? ' - ' + a.suburb : '') }; });
-  cache.set(key, { t: Date.now(), v }); return v;
+  const r = await nominatim(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(chain.osmQuery)}&format=jsonv2&limit=30&bounded=1&viewbox=${vb}&addressdetails=1&accept-language=pt-BR`);
+  const v = (Array.isArray(r) ? r : [])
+    .filter(e => placeOk(e, chain) && shopMatchesChain(e.name || e.display_name || '', chain))
+    .map(e => {
+      const a = e.address || {};
+      const slat = +e.lat, slon = +e.lon;
+      return {
+        name: e.name || chain.name, lat: slat, lon: slon,
+        addr: [a.road, a.house_number].filter(Boolean).join(', ') + (a.suburb ? ' - ' + a.suburb : ''),
+        km: hav(lat, lon, slat, slon),
+      };
+    })
+    .filter(s => s.km <= 80);
+  cache.set(key, { t: Date.now(), v });
+  return v;
 }
-function hav(a, b, c, d) { const R = 6371, r = x => x * Math.PI / 180; const x = Math.sin(r(c - a) / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(r(d - b) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }
-function nearest(shops, lat, lon) {
-  if (!shops || !shops.length) return null;
-  return shops.map(s => ({ ...s, km: hav(lat, lon, s.lat, s.lon) })).sort((a, b) => a.km - b.km)[0];
+
+async function locateChains(chainIds, lat, lon) {
+  const ranked = [...new Set(chainIds)].map(id => BY_ID.get(id)).filter(Boolean)
+    .sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name))
+    .slice(0, 18);
+  const br = {}; let osmOk = true, osmErr, nShops = 0;
+  for (const ch of ranked) {
+    try { br[ch.id] = await branches(ch, lat, lon); nShops += br[ch.id].length; }
+    catch (e) { osmOk = false; osmErr = String(e.message || e); br[ch.id] = []; }
+  }
+  return { br, osm: { ok: osmOk, shops: nShops, error: osmErr, radiusKm: RADIUS_KM } };
+}
+
+async function resolvePlace(raw) {
+  const q = String(raw || '').trim();
+  const cep = normalizeCep(q);
+  if (cep) {
+    try {
+      const j = await get(`https://brasilapi.com.br/api/cep/v2/${cep}`, { timeout: 8000 });
+      const c = j.location && j.location.coordinates;
+      const lat = parseFloat(c && c.latitude), lon = parseFloat(c && c.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon, label: `${j.city} - ${j.state}`, cep };
+    } catch { /* tenta ViaCEP + Nominatim */ }
+    const j = await get(`https://viacep.com.br/ws/${cep}/json/`, { timeout: 8000 });
+    if (j.erro) throw new Error('CEP não encontrado');
+    const hits = await nominatim(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(`${j.localidade}, ${j.uf}, Brasil`)}&format=jsonv2&limit=1&countrycodes=br`);
+    if (!hits.length) throw new Error('CEP não encontrado');
+    return { lat: +hits[0].lat, lon: +hits[0].lon, label: `${j.localidade} - ${j.uf}`, cep };
+  }
+  const hits = await nominatim(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1&countrycodes=br&addressdetails=1`);
+  if (!Array.isArray(hits) || !hits.length) throw new Error('local não encontrado');
+  const a = hits[0].address || {};
+  const city = a.city || a.town || a.village || a.municipality || hits[0].name;
+  const label = [city, a.state].filter(Boolean).join(' - ') || hits[0].display_name;
+  return { lat: +hits[0].lat, lon: +hits[0].lon, label };
 }
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
-const SEGS = Object.keys(SOURCES);
 const rank = v => v === 'Outros' ? 2 : v.startsWith('Combinações') ? 1 : 0;
-// rate limit simples por IP: 30 req/min na API
 const hits = new Map();
 app.set('trust proxy', true);
-app.use('/api', (req, res, next) => { const ip = req.ip, now = Date.now(); const h = (hits.get(ip) || []).filter(t => now - t < 60e3); h.push(now); hits.set(ip, h);
-  if (h.length > 30) return res.status(429).json({ error: 'Muitas buscas. Aguarde um minuto.' }); next(); });
+app.use('/api', (req, res, next) => {
+  const ip = req.ip, now = Date.now();
+  const h = (hits.get(ip) || []).filter(t => now - t < 60e3);
+  h.push(now); hits.set(ip, h);
+  if (h.length > 30) return res.status(429).json({ error: 'Muitas buscas. Aguarde um minuto.' });
+  next();
+});
+
 function variantSummary(items) {
   const g = {};
   for (const i of items) {
@@ -170,8 +202,17 @@ async function resolveAndSearch(seg, rawQ) {
   }
   return { searchQ, correction, commerce, data, generic };
 }
+
+app.get('/api/geo', async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q) return res.status(400).json({ error: 'Informe um CEP ou cidade' });
+  try { res.json(await resolvePlace(q)); }
+  catch (e) { res.status(404).json({ error: String(e.message || e) }); }
+});
+
 app.get('/api/variants', async (req, res) => {
-  const seg = SEGS.includes(req.query.seg) ? req.query.seg : 'farmacia'; const q = (req.query.q || '').trim();
+  const seg = SEGS.includes(req.query.seg) ? req.query.seg : 'farmacia';
+  const q = (req.query.q || '').trim();
   if (!q) return res.status(400).json({ error: 'Digite um produto' });
   const found = await resolveAndSearch(seg, q);
   const summary = variantSummary(found.data.items);
@@ -188,38 +229,48 @@ app.get('/api/variants', async (req, res) => {
   res.json({
     q, resolvedQ: found.searchQ, seg, correction: correctionPayload(found.correction),
     brand: found.commerce.brand, ingredient: found.commerce.ingredient, generic,
-    variants: summary.variants, total: summary.total, status: found.data.status,
+    variants: summary.variants, total: summary.total, status: found.data.status, radiusKm: RADIUS_KM,
   });
 });
+
 app.get('/api/offers', async (req, res) => {
-  const seg = SEGS.includes(req.query.seg) ? req.query.seg : 'farmacia'; const q = (req.query.q || '').trim();
+  const seg = SEGS.includes(req.query.seg) ? req.query.seg : 'farmacia';
+  const q = (req.query.q || '').trim();
   const lat = parseFloat(req.query.lat) || DEFAULT.lat, lon = parseFloat(req.query.lon) || DEFAULT.lon;
+  const label = (req.query.label || '').trim() || null;
   const found = await resolveAndSearch(seg, q);
   let list = req.query.variant ? found.data.items.filter(i => i.variant === req.query.variant) : found.data.items;
-  list = [...list].sort((a, b) => a.price - b.price).slice(0, 40);
-  const genericList = (found.generic && !found.generic.unavailable)
-    ? selectGenericOffers(found.generic.items, found.commerce.brand, req.query.variant || null).slice(0, 12) : [];
-  const chains = [...new Set([...list, ...genericList].map(i => i.osm).filter(Boolean))].slice(0, 8);
-  const br = {}; let osmOk = true, osmErr, nShops = 0;
-  for (const ch of chains) { try { br[ch] = await branches(ch, lat, lon); nShops += br[ch].length; } catch (e) { osmOk = false; osmErr = String(e.message); } }
-  const toOffer = i => { const n = nearest(br[i.osm], lat, lon);
-    return { ...i, osm: undefined, nearest: n ? { name: n.name, address: n.addr || null, km: +n.km.toFixed(1), lat: n.lat, lon: n.lon } : null }; };
-  const offers = list.map(toOffer);
-  const genericOffers = genericList.map(toOffer);
+  list = [...list].sort((a, b) => a.price - b.price);
+  const genericItems = (found.generic && !found.generic.unavailable)
+    ? selectGenericOffers(found.generic.items, found.commerce.brand, req.query.variant || null) : [];
+  const ids = [...list, ...genericItems].map(i => i.chainId).filter(Boolean);
+  const located = await locateChains(ids, lat, lon);
+  const main = splitOffers(list, located.br, lat, lon);
+  const genSplit = splitOffers(genericItems, located.br, lat, lon);
+  const offers = main.nearby.slice(0, 40);
+  const online = main.online.slice(0, 20);
+  const genericOffers = genSplit.nearby.slice(0, 12);
+  const genericOnline = genSplit.online.slice(0, 8);
   let generic = null;
   if (found.generic) {
+    const priceBase = offers.length ? offers : online;
+    const genBase = genericOffers.length ? genericOffers : genericOnline;
     generic = {
       unavailable: !!found.generic.unavailable,
-      message: found.generic.unavailable ? NO_GENERIC_MESSAGE : (genericOffers.length ? null : NONE_FOUND_MESSAGE),
-      q: found.generic.q, offers: genericOffers, min: genericOffers[0]?.price ?? null,
-      savings: found.generic.unavailable ? null : savingsBetween(offers, genericOffers), status: found.generic.status,
+      message: found.generic.unavailable ? NO_GENERIC_MESSAGE : (genBase.length ? null : NONE_FOUND_MESSAGE),
+      q: found.generic.q, offers: genericOffers, online: genericOnline,
+      min: genBase[0]?.price ?? null,
+      savings: found.generic.unavailable ? null : savingsBetween(priceBase, genBase),
+      status: found.generic.status,
     };
   }
   res.json({
-    q, resolvedQ: found.searchQ, seg, variant: req.query.variant || null, location: { lat, lon },
+    q, resolvedQ: found.searchQ, seg, variant: req.query.variant || null,
+    location: { lat, lon, label, radiusKm: RADIUS_KM },
     correction: correctionPayload(found.correction), brand: found.commerce.brand, ingredient: found.commerce.ingredient,
-    generic, offers, status: found.data.status, osm: { ok: osmOk, shops: nShops, error: osmErr },
+    generic, offers, online, status: found.data.status, osm: located.osm,
   });
 });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('Busca Preços em http://localhost:' + PORT));
